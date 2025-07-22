@@ -3,6 +3,7 @@
   <div style="width: 100%; padding: 20px;">
     <div style="width: 90%; min-width: 800px; margin: 0 auto;">
       <!-- 第一个Card：文件上传 -->
+      
       <el-card style="width: 100% !important; margin-bottom: 20px;">
         <div class="upload-container">
           <div v-if="isAnalyzing" class="loading-overlay">
@@ -73,18 +74,48 @@
        
       </el-card>
 
+      <el-button
+              
+              type="primary"
+              @click="update"
+              class="generate-test-case-btn"
+             
+            >
+              生成脑图
+            </el-button>
+<!-- v-if="testCaseResult || isGeneratingTestCase" -->
+      <!-- 脑图显示卡片 -->
+      <el-card style="width: 100% !important; margin-top: 20px;" >
+        <div class="mindmap-container" style="width: 100%;">
+          <textarea 
+            class="mindmap-input"
+            v-model="testCaseofmarkdown"
+            @input="adjustTextareaHeight"
+            :style="{ height: textareaHeight, minHeight: '200px' }"
+            placeholder="在此输入脑图内容..."
+          ></textarea>
+          <svg 
+            class="mindmap-svg"
+            ref="svgRef"
+            :style="{ height: textareaHeight, minHeight: '200px' }"
+          ></svg>
+        </div>
+      </el-card>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue';
+import { ref, onMounted, onUpdated, watch, nextTick } from 'vue'; // 添加watch和nextTick
 import { UploadFilled, Loading } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import axios from 'axios';
 import { MdPreview, MdCatalog } from 'md-editor-v3';
 // preview.css相比style.css少了编辑器那部分样式
 import 'md-editor-v3/lib/preview.css';
+// 导入markmap相关库
+import { Markmap } from 'markmap-view';
+import { transformer } from './markmap';
   
   // 文件上传状态
 const fileList = ref([]);
@@ -168,6 +199,60 @@ const clearAll = () => {
   ElMessage.success('所有内容已清空');
 };
 
+//创建响应式变量，用于存储从接口获取的 markdown 格式文本内容
+const svgRef = ref();
+const testCaseofmarkdown = ref("");
+let mm= null;
+
+// 添加textarea高度响应式变量
+const textareaHeight = ref('200px');
+
+// 修改textarea高度调整函数
+const adjustTextareaHeight = (e) => {
+  const textarea = e?.target || document.querySelector('.mindmap-input');
+  if (!textarea) return;
+  
+  // 重置高度以获取正确的scrollHeight
+  textarea.style.height = 'auto';
+  // 设置新高度，确保至少200px
+  const newHeight = Math.min(1000,Math.max(200, textarea.scrollHeight)) + 'px';
+  textareaHeight.value = newHeight;
+  
+  // 同步更新脑图高度
+  if (mm) {
+    mm.fit();
+  }
+};
+
+// 初始化时设置默认高度
+onMounted(() => {
+  textareaHeight.value = '200px';
+  adjustTextareaHeight();
+});
+
+// 监听文本变化调整高度
+watch(testCaseofmarkdown, () => {
+  nextTick(() => adjustTextareaHeight());
+});
+
+// 修改update函数确保脑图适应高度
+const update = async () => {
+  if(mm == null){
+    mm = Markmap.create(svgRef.value);
+  }
+  const { root } = transformer.transform(testCaseofmarkdown.value);
+  await mm.setData(root);
+  mm.fit();
+  // 确保svg高度与textarea同步
+  if (textareaHeight.value) {
+    svgRef.value.style.height = textareaHeight.value;
+  }
+};
+
+//onUpdated(update);
+
+
+
 // 生成测试用例
 const generateTestCase = async () => {
   if (!analysisText.value.trim()) return;
@@ -209,6 +294,13 @@ const generateTestCase = async () => {
               const jsonData = JSON.parse(data);
               const displayContent = jsonData.caseInfoMessage +'\n\n'+jsonData.caseFormatMessage+'\n\n'+ jsonData.caseReviewMessage;
               testCaseResult.value = displayContent;
+              if(jsonData.caseFormatMessage){
+                testCaseofmarkdown.value = jsonData.caseFormatMessage;
+                console.log("最终格式化后的数据",testCaseofmarkdown)
+                update();
+              }
+              
+
             } catch (e) {
               console.error(e)
               testCaseResult.value = rawContent;
@@ -423,5 +515,33 @@ html, body, #app { margin: 0; padding: 0; width: 100%; min-width: 100%; max-widt
 
 .test-case-container {
   position: relative;
+}
+</style>
+
+<style scoped>
+/* 脑图容器样式 */
+.mindmap-container {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+}
+
+/* 脑图输入框样式 */
+.mindmap-input {
+  width: 50%;
+  padding: 8px;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  resize: none;
+  box-sizing: border-box;
+}
+
+/* 脑图SVG样式 */
+.mindmap-svg {
+  width: 50%;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  box-sizing: border-box;
+  overflow: auto;
 }
 </style>
