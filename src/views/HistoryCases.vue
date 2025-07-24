@@ -43,14 +43,31 @@
       <el-dialog
         v-model="caseDetailVisible"
         title="用例详情"
-        width="800px"
+        width="80%"
+        height="80vh"
         :before-close="handleCloseDetail"
       >
-        <div v-if="currentCase">
-          <h3>{{ currentCase.name }}</h3>
-          <div class="case-content">
-            <pre>{{ currentCase.caseContent }}</pre>
-          </div>
+        <div v-if="currentCase" class="case-detail-container">
+          <!-- 上方卡片：显示原始内容 -->
+          <el-card class="top-card">
+            <h3>{{ currentCase.name }}</h3>
+            <div class="case-content">
+              <textarea
+                v-model="currentCase.caseContent"
+                ref="caseContentTextarea"
+                style="max-height: 500px; overflow-y: auto; height: auto; width: 100%; resize: vertical;"
+                @input="adjustTextareaHeight"
+              ></textarea>
+            </div>
+          </el-card>
+          
+          <!-- 下方卡片：显示脑图 -->
+          <el-card class="bottom-card">
+            <h3>用例脑图可视化</h3>
+            <div class="markmap-container">
+              <svg ref="svgRef"></svg>
+            </div>
+          </el-card>
         </div>
       </el-dialog>
     </div>
@@ -58,9 +75,14 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue';
+import { ref, reactive, watch, onMounted, nextTick } from 'vue';
 import { ElMessage } from 'element-plus';
 import axios from 'axios';
+// 导入markmap相关依赖
+import { Markmap } from 'markmap-view';
+import { transformer } from './markmap';
+
+
 
 // 搜索关键词
 const searchKeyword = ref('');
@@ -76,6 +98,10 @@ const pageSize = ref(10);
 const caseDetailVisible = ref(false);
 // 当前查看的用例
 const currentCase = ref(null);
+// svg引用
+const svgRef = ref(null);
+// markmap实例
+let mm = null;
 
 // 加载用例列表
 const loadCaseList = async () => {
@@ -103,6 +129,42 @@ const loadCaseList = async () => {
 const viewCase = (row) => {
   currentCase.value = { ...row };
   caseDetailVisible.value = true;
+  // 弹窗打开后立即更新脑图
+  setTimeout(() => {
+    update();
+  }, 0);
+};
+
+// 当弹窗显示且currentCase变化时更新脑图
+watch([() => caseDetailVisible.value, () => currentCase.value], async ([visible, caseData]) => {
+  if (visible && caseData && caseData.caseContent) {
+    await update();
+  }
+});
+
+// 更新脑图函数
+const update = async () => {
+  if(mm == null && svgRef.value){
+    // 创建markmap实例时添加配置，设置默认字体大小为14px
+    mm = Markmap.create(svgRef.value, {
+      styles: {
+        '.node text': { 'font-size': '14px' }
+      }
+    });
+  }
+  if (mm && currentCase.value && currentCase.value.caseContent) {
+    const { root } = transformer.transform(currentCase.value.caseContent);
+    await mm.setData(root);
+    mm.fit();
+  }
+};
+
+// 关闭详情弹窗
+const handleCloseDetail = () => {
+  caseDetailVisible.value = false;
+  currentCase.value = null;
+  // 重置markmap实例
+  mm = null;
 };
 
 // 删除用例
@@ -119,12 +181,6 @@ const deleteCase = async (id) => {
   } catch (error) {
     ElMessage.error(`用例删除失败: ${error.message}`);
   }
-};
-
-// 关闭详情弹窗
-const handleCloseDetail = () => {
-  caseDetailVisible.value = false;
-  currentCase.value = null;
 };
 
 // 页码变化
@@ -151,6 +207,40 @@ const resetSearch = () => {
   searchKeyword.value = '';
   loadCaseList();
 };
+
+const caseContentTextarea = ref(null);
+
+// 调整textarea高度的方法
+const adjustTextareaHeight = (e) => {
+  const textarea = e?.target || document.querySelector('.mindmap-input');
+  if (!textarea) return;
+  
+  // 重置高度以获取正确的scrollHeight
+  textarea.style.height = 'auto';
+  // 设置新高度，确保至少200px
+  const newHeight = Math.min(500,Math.max(200, textarea.scrollHeight)) + 'px';
+  textareaHeight.value = newHeight;
+  
+  // 同步更新脑图高度
+  if (mm) {
+    mm.fit();
+  }
+};
+
+
+// 监听文本变化调整高度和更新脑图
+watch(currentCase.caseContent, () => {
+  nextTick(() => {
+    adjustTextareaHeight();
+    // 文本变化时自动更新脑图
+    update();
+  });
+});
+
+// 组件挂载时调整高度
+onMounted(() => {
+  adjustTextareaHeight();
+});
 </script>
 
 <style scoped>
@@ -171,5 +261,40 @@ const resetSearch = () => {
   background-color: #f9f9f9;
   max-height: 400px;
   overflow-y: auto;
+}
+
+.case-detail-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 70vh;
+  overflow: hidden;
+}
+
+.top-card {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.bottom-card {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.markmap-container {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.markmap-container svg {
+  width: 100%;
+  height: 100%;
 }
 </style>
