@@ -74,15 +74,7 @@
        
       </el-card>
 
-      <el-button
-              
-              type="primary"
-              @click="update"
-              class="generate-test-case-btn"
-             
-            >
-              生成脑图
-            </el-button>
+      
 <!-- v-if="testCaseResult || isGeneratingTestCase" -->
       <!-- 脑图显示卡片 -->
       <el-card style="width: 100% !important; margin-top: 20px;" >
@@ -101,6 +93,38 @@
           ></svg>
         </div>
       </el-card>
+<!-- 新增保存用例按钮 -->
+      <div style="text-align: center; margin-top: 10px;">
+        <el-button type="primary" @click="openSaveDialog">保存用例</el-button>
+      </div>
+
+      <!-- 保存用例弹窗 -->
+      <el-dialog 
+        v-model="saveDialogVisible"
+        title="保存用例"
+        width="400px"
+        :before-close="handleClose"
+      >
+        <div style="margin-bottom: 20px;">
+          <span>请输入用例名称：</span>
+          <el-input 
+            v-model="caseName"
+            placeholder="请输入用例名称"
+            style="width: 100%; margin-top: 10px;"
+            :validate-event="false"
+          ></el-input>
+          <div v-if="showError" style="color: #f56c6c; font-size: 12px; margin-top: 5px;">
+            用例名称不能为空
+          </div>
+        </div>
+        <template #footer>
+          <span class="dialog-footer">
+            <el-button @click="saveDialogVisible = false">取消</el-button>
+            <el-button type="primary" @click="saveTestCase">确定</el-button>
+          </span>
+        </template>
+      </el-dialog>
+
     </div>
   </div>
 </template>
@@ -230,9 +254,13 @@ onMounted(() => {
   adjustTextareaHeight();
 });
 
-// 监听文本变化调整高度
+// 监听文本变化调整高度和更新脑图
 watch(testCaseofmarkdown, () => {
-  nextTick(() => adjustTextareaHeight());
+  nextTick(() => {
+    adjustTextareaHeight();
+    // 文本变化时自动更新脑图
+    update();
+  });
 });
 
 // 修改update函数，添加markmap配置以调整文字大小
@@ -314,6 +342,46 @@ const generateTestCase = async () => {
   }
 };
 
+// 添加保存用例相关变量
+const saveDialogVisible = ref(false);
+const caseName = ref('');
+const showError = ref(false);
+
+// 打开保存用例弹窗
+const openSaveDialog = () => {
+  caseName.value = '';
+  showError.value = false;
+  saveDialogVisible.value = true;
+};
+
+// 关闭弹窗
+const handleClose = () => {
+  saveDialogVisible.value = false;
+};
+
+// 保存用例
+const saveTestCase = async () => {
+  if (!caseName.value.trim()) {
+    showError.value = true;
+    return;
+  }
+
+  try {
+    const response = await axios.post('/ai-api/case/save', {
+      caseName: caseName.value.trim(),
+      caseContent: testCaseofmarkdown.value
+    });
+
+    if (response.data.code === 200) {
+      ElMessage.success('用例保存成功');
+      saveDialogVisible.value = false;
+    } else {
+      ElMessage.error(`保存失败: ${response.data.message || '未知错误'}`);
+    }
+  } catch (error) {
+    ElMessage.error(`保存失败: ${error.message}`);
+  }
+};
 </script>
 
 <style scoped>
