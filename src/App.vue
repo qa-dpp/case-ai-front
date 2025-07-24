@@ -86,18 +86,18 @@
 <!-- v-if="testCaseResult || isGeneratingTestCase" -->
       <!-- 脑图显示卡片 -->
       <el-card style="width: 100% !important; margin-top: 20px;" >
-        <div class="mindmap-container" style="width: 100%;">
+        <div class="mindmap-container" style="width: 100%; display: flex; flex-direction: column; gap: 10px;">
           <textarea 
             class="mindmap-input"
             v-model="testCaseofmarkdown"
             @input="adjustTextareaHeight"
-            :style="{ height: textareaHeight, minHeight: '200px' }"
+            :style="{ width: '100%', height: textareaHeight, minHeight: '200px', maxHeight: '500px' }"
             placeholder="在此输入脑图内容..."
           ></textarea>
           <svg 
             class="mindmap-svg"
             ref="svgRef"
-            :style="{ height: textareaHeight, minHeight: '200px' }"
+            :style="{ width: '100%', minHeight: '800px', height: 'auto' }"
           ></svg>
         </div>
       </el-card>
@@ -215,7 +215,7 @@ const adjustTextareaHeight = (e) => {
   // 重置高度以获取正确的scrollHeight
   textarea.style.height = 'auto';
   // 设置新高度，确保至少200px
-  const newHeight = Math.min(1000,Math.max(200, textarea.scrollHeight)) + 'px';
+  const newHeight = Math.min(500,Math.max(200, textarea.scrollHeight)) + 'px';
   textareaHeight.value = newHeight;
   
   // 同步更新脑图高度
@@ -235,18 +235,15 @@ watch(testCaseofmarkdown, () => {
   nextTick(() => adjustTextareaHeight());
 });
 
-// 修改update函数确保脑图适应高度
+// 修改update函数，添加markmap配置以调整文字大小
 const update = async () => {
   if(mm == null){
+    // 创建markmap实例时添加配置，设置默认字体大小为14px
     mm = Markmap.create(svgRef.value);
   }
   const { root } = transformer.transform(testCaseofmarkdown.value);
   await mm.setData(root);
   mm.fit();
-  // 确保svg高度与textarea同步
-  if (textareaHeight.value) {
-    svgRef.value.style.height = textareaHeight.value;
-  }
 };
 
 //onUpdated(update);
