@@ -10,7 +10,8 @@
           suffix-icon="Search"
         ></el-input>
         <el-button type="primary" @click="loadCaseList">搜索</el-button>
-       
+        <el-button @click="resetSearch">重置</el-button>
+      
       </div>
       <el-table :data="caseList" style="width: 100%">
         <el-table-column prop="id" label="用例ID" width="300"></el-table-column>
@@ -145,6 +146,11 @@ onMounted(() => {
 });
 
 
+// 添加重置按钮对应的函数
+const resetSearch = () => {
+  searchKeyword.value = '';
+  loadCaseList();
+};
 </script>
 
 <style scoped>
