@@ -47,6 +47,9 @@
         height="80vh"
         :before-close="handleCloseDetail"
       >
+        <!-- <template #header-append> -->
+          <el-button type="primary" @click="saveCase">用例保存</el-button>
+        <!-- </template> -->
         <div v-if="currentCase" class="case-detail-container">
           <!-- 上方卡片：显示原始内容 -->
           <el-card class="top-card">
@@ -122,6 +125,28 @@ const loadCaseList = async () => {
     }
   } catch (error) {
     ElMessage.error(`获取用例列表失败: ${error.message}`);
+  }
+};
+
+// 保存用例
+const saveCase = async () => {
+  if (!currentCase.value) return;
+  
+  try {
+    const response = await axios.post('/ai-api/case/save', {
+      caseName: currentCase.value.name,
+      caseContent: currentCase.value.caseContent // 修正属性名拼写错误
+    });
+
+    if (response.data.code === 200) {
+      ElMessage.success('用例保存成功');
+      // 保存成功后可以刷新用例列表
+      loadCaseList();
+    } else {
+      ElMessage.error(`用例保存失败: ${response.data.message || '未知错误'}`);
+    }
+  } catch (error) {
+    ElMessage.error(`用例保存失败: ${error.message}`);
   }
 };
 
@@ -209,16 +234,20 @@ const resetSearch = () => {
 };
 
 const caseContentTextarea = ref(null);
+// 定义textarea高度的ref变量
+const textareaHeight = ref('auto');
 
 // 调整textarea高度的方法
 const adjustTextareaHeight = (e) => {
-  const textarea = e?.target || document.querySelector('.mindmap-input');
+  // 优先使用ref获取元素，其次使用事件目标
+  const textarea = caseContentTextarea.value || e?.target;
   if (!textarea) return;
   
   // 重置高度以获取正确的scrollHeight
   textarea.style.height = 'auto';
-  // 设置新高度，确保至少200px
-  const newHeight = Math.min(500,Math.max(200, textarea.scrollHeight)) + 'px';
+  // 设置新高度，确保至少200px，最大500px
+  const newHeight = Math.min(500, Math.max(200, textarea.scrollHeight)) + 'px';
+  textarea.style.height = newHeight;
   textareaHeight.value = newHeight;
   
   // 同步更新脑图高度
@@ -229,7 +258,7 @@ const adjustTextareaHeight = (e) => {
 
 
 // 监听文本变化调整高度和更新脑图
-watch(currentCase.caseContent, () => {
+watch(() => currentCase.value?.caseContent, () => {
   nextTick(() => {
     adjustTextareaHeight();
     // 文本变化时自动更新脑图
@@ -267,7 +296,7 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  height: 70vh;
+  height: calc(100% - 40px); /* 使用弹窗全部可用高度 */
   overflow: hidden;
 }
 
@@ -276,10 +305,12 @@ onMounted(() => {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  max-height: 500px; /* 限制上方卡片最大高度 */
 }
 
 .bottom-card {
   flex: 1;
+  min-height: 800px; /* 设置最小高度800px */
   overflow: hidden;
   display: flex;
   flex-direction: column;
