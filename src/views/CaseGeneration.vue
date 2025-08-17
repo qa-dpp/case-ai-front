@@ -47,14 +47,34 @@
 
           ></el-input>
           
+          <!-- 生成测试用例按钮 -->
           <div class="test-case-btn-container">
+            <span style="margin-right: 8px; font-weight: 500;">历史用例：</span>
+            <el-select
+              v-if="analysisText.trim()"
+              v-model="selectedCase"
+              filterable
+              remote
+              reserve-keyword
+              placeholder="上传历史用例"
+              :remote-method="fetchCaseList"
+              :loading="isLoadingCaseList"
+              value-key="name"  
+              style="width: 240px; margin-right: 10px;"
+            >
+              <el-option
+                v-for="caseItem in caseList"
+                :key="caseItem.id"
+                :label="caseItem.name"
+                :value="caseItem"
+              ></el-option>
+            </el-select>
             <el-button
               v-if="analysisText.trim()"
               type="primary"
               @click="generateTestCase"
               class="generate-test-case-btn"
-              :loading="isGeneratingTestCase"
-            >
+              :loading="isGeneratingTestCase">
               生成测试用例
             </el-button>
           </div>
@@ -286,12 +306,18 @@ const generateTestCase = async () => {
   testCaseResult.value = '';
   
   try {
+    // 获取caseName的值：如果选中了历史用例则使用其name，否则为空字符串
+    const caseId = selectedCase.value?.id || '';
+    
     const response = await fetch('/ai-api/case/create', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ content: analysisText.value })
+      body: JSON.stringify({
+        content: analysisText.value,
+        caseId: caseId  // 新增caseId入参
+      })
     });
     
     if (!response.ok) {
@@ -317,11 +343,18 @@ const generateTestCase = async () => {
             console.log("返回结果",rawContent)
             try {
               const jsonData = JSON.parse(data);
-              const displayContent = jsonData.caseInfoMessage +'\n\n'+jsonData.caseFormatMessage+'\n\n'+ jsonData.caseReviewMessage;
+              const displayContent = (jsonData.caseInfoMessage||'') +'\n\n'+ (jsonData.caseReviewMessage||'');
               testCaseResult.value = displayContent;
-              if(jsonData.caseFormatMessage){
-                testCaseofmarkdown.value = jsonData.caseFormatMessage;
-                console.log("最终格式化后的数据",testCaseofmarkdown)
+              if(jsonData.caseInfoMessage){
+                // 判断是否包含```markdown标记并提取内容
+                const markdownRegex = /```markdown\n([\s\S]*?)```/;
+                const match = jsonData.caseInfoMessage.match(markdownRegex);
+  
+                // 如果匹配成功，使用匹配到的内容；否则使用原始值
+                const formattedContent = match ? match[1] : jsonData.caseInfoMessage;
+  
+                testCaseofmarkdown.value = formattedContent;
+                console.log("处理后的数据", caseInfoMessage.value)
                 update();
               }
               
@@ -382,6 +415,47 @@ const saveTestCase = async () => {
     ElMessage.error(`保存失败: ${error.message}`);
   }
 };
+// 历史用例选择相关变量
+const selectedCase = ref(null);
+const caseList = ref([]);
+const isLoadingCaseList = ref(false);
+const currentPage = ref(1);
+const pageSize = ref(10);
+
+// 获取历史用例列表
+const fetchCaseList = async (keyword) => {
+  if (!keyword) {
+    caseList.value = [];
+    return;
+  }
+
+  isLoadingCaseList.value = true;
+  try {
+    const response = await axios.post('/ai-api/case/list', {
+      keyword: keyword,
+      page: currentPage.value,
+      pageSize: pageSize.value
+    });
+
+    if (response.data.code === 200) {
+      caseList.value = response.data.data || [];
+    } else {
+      ElMessage.error(`获取用例列表失败: ${response.data.message || '未知错误'}`);
+    }
+  } catch (error) {
+    ElMessage.error(`获取用例列表失败: ${error.message}`);
+  } finally {
+    isLoadingCaseList.value = false;
+  }
+};
+
+// 监听选中用例变化
+watch(selectedCase, (newVal) => {
+  if (newVal) {
+    // 这里可以根据需求处理选中的用例
+    console.log('选中的用例:', newVal);
+  }
+});
 </script>
 
 <style scoped>
