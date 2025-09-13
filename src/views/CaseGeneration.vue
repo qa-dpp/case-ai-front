@@ -27,7 +27,7 @@
             </div>
             <template #tip>
               <div class="el-upload__tip text-center">
-                支持上传txt、pdf、docx格式文件，最多5个文件
+                支持上传txt、pdf格式文件，最多5个文件
               </div>
             </template>
           </el-upload>
@@ -171,7 +171,7 @@ const API_ENDPOINTS = {
 
 const FILE_CONFIG = {
   ALLOWED_TYPES: ['text/plain', 'application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
-  ALLOWED_EXTENSIONS: ['txt', 'pdf', 'docx'],
+  ALLOWED_EXTENSIONS: ['txt', 'pdf'],
   MAX_FILES: 5
 };
 
