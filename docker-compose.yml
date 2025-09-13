@@ -29,7 +29,7 @@ services:
 
   # Nginx代理服务，处理所有外部请求
   nginx-proxy:
-    image: nginx:alpine
+    image: nginx:1.29.1-alpine3.22-perl
     container_name: case-ai-nginx-proxy
     depends_on:
       - frontend

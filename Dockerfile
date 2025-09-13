@@ -20,7 +20,7 @@ COPY . .
 RUN npm run build
 
 # 第二阶段：运行阶段
-FROM nginx:alpine
+FROM nginx:1.29.1-alpine3.22-perl
 
 # 复制nginx配置文件
 COPY --from=builder /app/dist /usr/share/nginx/html

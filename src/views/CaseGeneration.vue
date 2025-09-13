@@ -354,7 +354,7 @@ const generateTestCase = async () => {
                 const formattedContent = match ? match[1] : jsonData.caseInfoMessage;
   
                 testCaseofmarkdown.value = formattedContent;
-                console.log("处理后的数据", caseInfoMessage.value)
+                //console.log("处理后的数据", caseInfoMessage.value)
                 update();
               }
               
