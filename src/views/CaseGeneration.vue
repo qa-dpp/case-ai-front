@@ -150,35 +150,131 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUpdated, watch, nextTick } from 'vue'; // 添加watch和nextTick
+import { ref, onMounted, watch, nextTick } from 'vue';
 import { UploadFilled, Loading } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import axios from 'axios';
-import { MdPreview, MdCatalog } from 'md-editor-v3';
+import { MdPreview } from 'md-editor-v3';
 // preview.css相比style.css少了编辑器那部分样式
 import 'md-editor-v3/lib/preview.css';
 // 导入markmap相关库
 import { Markmap } from 'markmap-view';
 import { transformer } from './markmap';
-  
-  // 文件上传状态
+
+// 常量定义
+const API_ENDPOINTS = {
+  UPLOAD: '/ai-api/file/upload',
+  CREATE_CASE: '/ai-api/case/create',
+  SAVE_CASE: '/ai-api/case/save',
+  LIST_CASES: '/ai-api/case/list'
+};
+
+const FILE_CONFIG = {
+  ALLOWED_TYPES: ['text/plain', 'application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+  ALLOWED_EXTENSIONS: ['txt', 'pdf', 'docx'],
+  MAX_FILES: 5
+};
+
+// 文件上传状态
 const fileList = ref([]);
-const allowedTypes = ['text/plain', 'application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
-const allowedExtensions = ['txt', 'pdf', 'docx'];
 
-// 分析结果状态
-const analysisText = ref('');
-const isAnalyzing = ref(false);
+// 应用状态
+const state = {
+  // 分析结果状态
+  analysisText: ref(''),
+  isAnalyzing: ref(false),
+  
+  // 测试用例状态
+  testCaseResult: ref(''),
+  isGeneratingTestCase: ref(false),
+  
+  // 脑图状态
+  svgRef: ref(),
+  testCaseofmarkdown: ref(''),
+  textareaHeight: ref('200px'),
+  
+  // 保存用例相关
+  saveDialogVisible: ref(false),
+  caseName: ref(''),
+  showError: ref(false),
+  
+  // 历史用例选择相关
+  selectedCase: ref(null),
+  caseList: ref([]),
+  isLoadingCaseList: ref(false),
+  currentPage: ref(1),
+  pageSize: ref(10)
+};
 
-// 测试用例状态
-const testCaseResult = ref('');
-const isGeneratingTestCase = ref(false);
+// 解构状态以便在模板中使用
+const { 
+  analysisText, isAnalyzing, 
+  testCaseResult, isGeneratingTestCase,
+  svgRef, testCaseofmarkdown, textareaHeight,
+  saveDialogVisible, caseName, showError,
+  selectedCase, caseList, isLoadingCaseList
+} = state;
+
+// markmap实例
+let mm = null;
+
+// 工具函数
+/**
+ * 防抖函数
+ * @param {Function} fn 需要防抖的函数
+ * @param {number} delay 延迟时间(ms)
+ * @returns {Function} 防抖处理后的函数
+ */
+const debounce = (fn, delay) => {
+  let timer = null;
+  return function(...args) {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      fn.apply(this, args);
+    }, delay);
+  };
+};
+
+/**
+ * 提取Markdown内容
+ * @param {string} text 包含markdown代码块的文本
+ * @returns {string} 提取的markdown内容
+ */
+const extractMarkdownContent = (text) => {
+  // 匹配```markdown块中的内容，支持结束的```不存在的场景
+  // 1. 尝试匹配标准格式：```markdown\n内容```
+  // 2. 如果没有匹配到，尝试匹配：```markdown\n内容（到结束）
+  const standardRegex = /```markdown\n([\s\S]*?)```/g;
+  const unclosedRegex = /```markdown\n([\s\S]*?)($|(?=```\w))/g;
+  
+  // 先尝试标准格式
+  const standardMatches = [...text.matchAll(standardRegex)];
+  if (standardMatches.length > 0) {
+    // 合并所有匹配到的markdown内容
+    return standardMatches.map(match => match[1]).join('\n\n');
+  }
+  
+  // 如果标准格式没有匹配到，尝试未闭合的格式
+  const unclosedMatches = [...text.matchAll(unclosedRegex)];
+  if (unclosedMatches.length > 0) {
+    return unclosedMatches.map(match => match[1]).join('\n\n');
+  }
+  
+  // 如果两种格式都没匹配到，直接查找```markdown后的所有内容
+  const fallbackRegex = /```markdown\n([\s\S]*)/;
+  const fallbackMatch = text.match(fallbackRegex);
+  if (fallbackMatch) {
+    return fallbackMatch[1];
+  }
+  
+  return text; // 如果没有匹配到，返回原始文本
+};
 
 // 文件上传处理函数
 const beforeUpload = (file) => {
   const fileExtension = file.name.split('.').pop().toLowerCase();
-  if (!allowedExtensions.includes(fileExtension)) {
-    ElMessage.error('只能上传txt、pdf、docx格式的文件');
+  if (!FILE_CONFIG.ALLOWED_EXTENSIONS.includes(fileExtension)) {
+    ElMessage.error(`只能上传${FILE_CONFIG.ALLOWED_EXTENSIONS.join('、')}格式的文件`);
     return false;
   }
   return true;
@@ -193,7 +289,7 @@ const handleRemove = (file, files) => {
 };
 
 const handleExceed = () => {
-  ElMessage.error('最多只能上传5个文件');
+  ElMessage.error(`最多只能上传${FILE_CONFIG.MAX_FILES}个文件`);
 };
 
 // 按钮处理函数
@@ -213,27 +309,29 @@ const startAnalysis = async () => {
   analysisText.value = '';
   
   try {
-      // 创建FormData对象并添加文件
-      const formData = new FormData();
-      fileList.value.forEach(file => {
-        formData.append('files', file.raw);
-      });   
-      
-      // 发送文件到后端API
-      const response = await axios.post('/ai-api/file/upload', formData);
-      const responseData = response.data;
-      
-      if (responseData.code !== 200) {
-        throw new Error(responseData.message || '文件分析失败');
-      }
-      
-      analysisText.value = responseData.data;
-    } catch (error) {
-      ElMessage.error(`上传失败: ${error.message}`);
-      analysisText.value = `上传失败: ${error.message}`;
-    } finally {
-      isAnalyzing.value = false;
+    // 创建FormData对象并添加文件
+    const formData = new FormData();
+    fileList.value.forEach(file => {
+      formData.append('files', file.raw);
+    });   
+    
+    // 发送文件到后端API
+    const response = await axios.post(API_ENDPOINTS.UPLOAD, formData);
+    const responseData = response.data;
+    
+    if (responseData.code !== 200) {
+      throw new Error(responseData.message || '文件分析失败');
     }
+    
+    analysisText.value = responseData.data;
+    ElMessage.success('文件分析成功');
+  } catch (error) {
+    console.error('文件分析失败:', error);
+    ElMessage.error(`上传失败: ${error.message}`);
+    analysisText.value = `上传失败: ${error.message}`;
+  } finally {
+    isAnalyzing.value = false;
+  }
 };
 
 const clearAll = () => {
@@ -243,13 +341,7 @@ const clearAll = () => {
   ElMessage.success('所有内容已清空');
 };
 
-//创建响应式变量，用于存储从接口获取的 markdown 格式文本内容
-const svgRef = ref();
-const testCaseofmarkdown = ref("");
-let mm= null;
 
-// 添加textarea高度响应式变量
-const textareaHeight = ref('200px');
 
 // 修改textarea高度调整函数
 const adjustTextareaHeight = (e) => {
@@ -283,24 +375,117 @@ watch(testCaseofmarkdown, () => {
   });
 });
 
-// 修改update函数，添加markmap配置以调整文字大小
+/**
+ * 更新脑图
+ */
 const update = async () => {
-  if(mm == null){
-    // 创建markmap实例时添加配置，设置默认字体大小为14px
-    mm = Markmap.create(svgRef.value);
+  if (!svgRef.value) return;
+  
+  try {
+    if (mm == null) {
+      // 创建markmap实例时添加配置，设置默认字体大小为14px
+      mm = Markmap.create(svgRef.value, {
+        nodeFont: '14px sans-serif',
+        nodeMinHeight: 16,
+        duration: 500, // 动画持续时间
+        maxWidth: 300, // 节点最大宽度
+      });
+    }
+    
+    if (testCaseofmarkdown.value) {
+      const { root } = transformer.transform(testCaseofmarkdown.value);
+      await mm.setData(root);
+      mm.fit();
+    }
+  } catch (error) {
+    console.error('更新脑图失败:', error);
   }
-  const { root } = transformer.transform(testCaseofmarkdown.value);
-  await mm.setData(root);
-  mm.fit();
 };
+
+// 使用防抖优化脑图更新
+const debouncedUpdate = debounce(update, 300);
 
 //onUpdated(update);
 
 
 
-// 生成测试用例
+/**
+ * 处理流式响应数据
+ * @param {ReadableStream} stream 可读流
+ * @returns {Promise<string>} 处理后的完整内容
+ */
+const handleStreamResponse = async (stream) => {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let result = '';
+  
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      
+      const chunk = decoder.decode(value, { stream: true });
+      // 处理SSE格式数据
+      const lines = chunk.split('\n');
+      
+      for (const line of lines) {
+        if (line.startsWith('data:')) {
+          const data = line.slice(5).trim();
+          result = data ||'';
+        } else if (line.trim()) {
+          result += line;
+        }
+      }
+    }
+    return result;
+  } catch (error) {
+    console.error('处理流式响应失败:', error);
+    throw error;
+  }
+};
+
+/**
+ * 处理测试用例数据
+ * @param {string} rawContent JSON格式的原始内容
+ */
+const processTestCaseData = async (rawContent) => {
+  console.log('处理测试用例数据:', rawContent);
+  try {
+    // 将返回的json字符串转换为对象
+    const jsonData = JSON.parse(rawContent);
+    
+    // 组合显示内容
+    const displayContent = [
+      jsonData.caseInfoMessage || '',
+      jsonData.caseReviewMessage || ''
+    ].filter(Boolean).join('\n\n');
+    
+    testCaseResult.value = displayContent;
+    
+    // 提取并处理Markdown内容
+    if (jsonData.caseInfoMessage) {
+      const formattedContent = extractMarkdownContent(jsonData.caseInfoMessage);
+      testCaseofmarkdown.value = formattedContent;
+      
+      // 使用nextTick确保DOM更新后再更新脑图
+      nextTick(() => {
+        update();
+      });
+    }
+  } catch (error) {
+    console.error('处理测试用例数据失败:', error);
+    throw new Error(`处理测试用例数据失败: ${error.message}`);
+  }
+};
+
+/**
+ * 生成测试用例
+ */
 const generateTestCase = async () => {
-  if (!analysisText.value.trim()) return;
+  if (!analysisText.value.trim()) {
+    ElMessage.warning('请先上传并分析文件');
+    return;
+  }
   
   isGeneratingTestCase.value = true;
   testCaseResult.value = '';
@@ -309,14 +494,14 @@ const generateTestCase = async () => {
     // 获取caseName的值：如果选中了历史用例则使用其name，否则为空字符串
     const caseId = selectedCase.value?.id || '';
     
-    const response = await fetch('/ai-api/case/create', {
+    const response = await fetch(API_ENDPOINTS.CREATE_CASE, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
         content: analysisText.value,
-        caseId: caseId  // 新增caseId入参
+        caseId: caseId
       })
     });
     
@@ -324,61 +509,23 @@ const generateTestCase = async () => {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
     
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
+    // 处理流式响应
+    const rawContent = await handleStreamResponse(response.body);
     
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      
-      const chunk = decoder.decode(value, { stream: true });
-      const lines = chunk.split('\n');
-      
-      for (const line of lines) {
-        let rawContent = '';
-        if (line.startsWith('data:')) {
-          const data = line.slice(5).trim();
-          if (data) {
-            rawContent += data + '\n\n';
-            console.log("返回结果",rawContent)
-            try {
-              const jsonData = JSON.parse(data);
-              const displayContent = (jsonData.caseInfoMessage||'') +'\n\n'+ (jsonData.caseReviewMessage||'');
-              testCaseResult.value = displayContent;
-              if(jsonData.caseInfoMessage){
-                // 判断是否包含```markdown标记并提取内容
-                const markdownRegex = /```markdown\n([\s\S]*?)```/;
-                const match = jsonData.caseInfoMessage.match(markdownRegex);
-  
-                // 如果匹配成功，使用匹配到的内容；否则使用原始值
-                const formattedContent = match ? match[1] : jsonData.caseInfoMessage;
-  
-                testCaseofmarkdown.value = formattedContent;
-                //console.log("处理后的数据", caseInfoMessage.value)
-                update();
-              }
-              
-
-            } catch (e) {
-              console.error(e)
-              testCaseResult.value = rawContent;
-            }
-          }
-        }
-      }
-    }
+    // 处理测试用例数据
+    await processTestCaseData(rawContent);
+    
+    ElMessage.success('生成测试用例成功');
   } catch (error) {
     console.error('生成测试用例失败:', error);
     ElMessage.error('生成测试用例失败: ' + error.message);
+    testCaseResult.value = '生成测试用例失败，请重试';
   } finally {
     isGeneratingTestCase.value = false;
   }
 };
 
-// 添加保存用例相关变量
-const saveDialogVisible = ref(false);
-const caseName = ref('');
-const showError = ref(false);
+
 
 // 打开保存用例弹窗
 const openSaveDialog = () => {
@@ -392,7 +539,9 @@ const handleClose = () => {
   saveDialogVisible.value = false;
 };
 
-// 保存用例
+/**
+ * 保存测试用例
+ */
 const saveTestCase = async () => {
   if (!caseName.value.trim()) {
     showError.value = true;
@@ -400,7 +549,13 @@ const saveTestCase = async () => {
   }
 
   try {
-    const response = await axios.post('/ai-api/case/save', {
+    // 检查是否有内容可保存
+    if (!testCaseofmarkdown.value.trim()) {
+      ElMessage.warning('没有可保存的测试用例内容');
+      return;
+    }
+
+    const response = await axios.post(API_ENDPOINTS.SAVE_CASE, {
       caseName: caseName.value.trim(),
       caseContent: testCaseofmarkdown.value
     });
@@ -408,21 +563,24 @@ const saveTestCase = async () => {
     if (response.data.code === 200) {
       ElMessage.success('用例保存成功');
       saveDialogVisible.value = false;
+      
+      // 刷新用例列表（如果当前有搜索关键词）
+      if (selectedCase.value?.name) {
+        fetchCaseList(selectedCase.value.name);
+      }
     } else {
       ElMessage.error(`保存失败: ${response.data.message || '未知错误'}`);
     }
   } catch (error) {
+    console.error('保存用例失败:', error);
     ElMessage.error(`保存失败: ${error.message}`);
   }
 };
-// 历史用例选择相关变量
-const selectedCase = ref(null);
-const caseList = ref([]);
-const isLoadingCaseList = ref(false);
-const currentPage = ref(1);
-const pageSize = ref(10);
 
-// 获取历史用例列表
+/**
+ * 获取历史用例列表
+ * @param {string} keyword 搜索关键词
+ */
 const fetchCaseList = async (keyword) => {
   if (!keyword) {
     caseList.value = [];
@@ -431,30 +589,48 @@ const fetchCaseList = async (keyword) => {
 
   isLoadingCaseList.value = true;
   try {
-    const response = await axios.post('/ai-api/case/list', {
+    const response = await axios.post(API_ENDPOINTS.LIST_CASES, {
       keyword: keyword,
-      page: currentPage.value,
-      pageSize: pageSize.value
+      page: state.currentPage.value,
+      pageSize: state.pageSize.value
     });
 
     if (response.data.code === 200) {
       caseList.value = response.data.data || [];
     } else {
+      console.error('获取用例列表失败:', response.data);
       ElMessage.error(`获取用例列表失败: ${response.data.message || '未知错误'}`);
     }
   } catch (error) {
+    console.error('获取用例列表请求异常:', error);
     ElMessage.error(`获取用例列表失败: ${error.message}`);
   } finally {
     isLoadingCaseList.value = false;
   }
 };
 
+// 事件监听和生命周期钩子
+onMounted(() => {
+  textareaHeight.value = '200px';
+  adjustTextareaHeight();
+});
+
 // 监听选中用例变化
 watch(selectedCase, (newVal) => {
-  if (newVal) {
-    // 这里可以根据需求处理选中的用例
-    console.log('选中的用例:', newVal);
+  if (newVal && newVal.content) {
+    testCaseofmarkdown.value = newVal.content;
+    nextTick(() => {
+      update();
+    });
   }
+});
+
+// 监听文本变化调整高度和更新脑图
+watch(testCaseofmarkdown, () => {
+  nextTick(() => {
+    adjustTextareaHeight();
+    debouncedUpdate();
+  });
 });
 </script>
 
@@ -661,26 +837,38 @@ html, body, #app { margin: 0; padding: 0; width: 100%; min-width: 100%; max-widt
 /* 脑图容器样式 */
 .mindmap-container {
   display: flex;
-  gap: 10px;
+  flex-direction: column;
+  gap: 15px;
   width: 100%;
 }
 
 /* 脑图输入框样式 */
 .mindmap-input {
-  width: 50%;
-  padding: 8px;
+  width: 100%;
+  padding: 12px;
   border: 1px solid #e0e0e0;
   border-radius: 4px;
   resize: none;
   box-sizing: border-box;
+  font-family: monospace;
+  line-height: 1.5;
+  transition: border-color 0.3s;
+}
+
+.mindmap-input:focus {
+  border-color: #409eff;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.2);
 }
 
 /* 脑图SVG样式 */
 .mindmap-svg {
-  width: 50%;
+  width: 100%;
   border: 1px solid #e0e0e0;
   border-radius: 4px;
   box-sizing: border-box;
   overflow: auto;
+  background-color: #fafafa;
+  min-height: 600px;
 }
 </style>
